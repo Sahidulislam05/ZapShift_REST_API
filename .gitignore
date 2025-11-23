@@ -1,0 +1,5 @@
+node_modules
+
+.env
+
+zap-shift-service-firebase-admin-sdk.json
