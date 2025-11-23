@@ -9,7 +9,6 @@ import admin from "firebase-admin";
 // console.log("Stripe Secret Key:", process.env.STRIPE_SECRET);
 const stripe = new Stripe(process.env.STRIPE_SECRET);
 // const stripe = require("stripe")(process.env.STRIPE_SECRET);
-dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
@@ -70,8 +69,37 @@ async function run() {
   try {
     await client.connect();
     const db = client.db("zap_shift");
+    const userCollection = db.collection("users");
     const parcelCollection = db.collection("parcels");
     const paymentCollection = db.collection("payments");
+    const ridersCollection = db.collection("riders");
+
+    // User REST API
+
+    app.post("/users", async (req, res) => {
+      try {
+        const user = req.body;
+        user.role = "user";
+        user.createdAt = new Date();
+        const email = user.email;
+        const userExist = await userCollection.findOne({ email });
+        if (userExist) {
+          return res.json({
+            message: "User already added",
+          });
+        }
+        const result = await userCollection.insertOne(user);
+        res.status(201).json({
+          message: "User added",
+          result,
+        });
+      } catch (error) {
+        res.status(404).json({
+          message: "User not added",
+          error,
+        });
+      }
+    });
 
     // Parcel API
 
@@ -299,13 +327,82 @@ async function run() {
             });
           }
         }
-        const cursor = paymentCollection.find(query);
+        const cursor = paymentCollection.find(query).sort({ paidAt: -1 });
         const result = await cursor.toArray();
         res.status(201).json({
           message: "Data found",
           result,
         });
         // res.send(result);
+      } catch (error) {
+        res.status(401).json({
+          message: "Data not found",
+          error,
+        });
+      }
+    });
+
+    // Riders REST API
+
+    app.get("/riders", async (req, res) => {
+      try {
+        const query = {};
+        if (req.query.status) {
+          query.status = req.query.status;
+        }
+        const cursor = ridersCollection.find(query);
+        const result = await cursor.toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(401).json({
+          message: "Data not found",
+          error,
+        });
+      }
+    });
+
+    app.post("/riders", async (req, res) => {
+      try {
+        const rider = req.body;
+        rider.status = "pending";
+        rider.createdAt = new Date();
+        const result = await ridersCollection.insertOne(rider);
+        res.send(result);
+      } catch (error) {
+        res.status(401).json({
+          message: "Data not found",
+          error,
+        });
+      }
+    });
+
+    app.patch("/riders/:id", verifyFBToken, async (req, res) => {
+      try {
+        const status = req.body.status;
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const updateDOC = {
+          $set: {
+            status: status,
+          },
+        };
+        const result = await ridersCollection.updateOne(query, updateDOC);
+
+        if (status === "approved") {
+          const email = req.body.email;
+          const useQuery = { email };
+          const updateUser = {
+            $set: {
+              role: "rider",
+            },
+          };
+          const userResult = await ridersCollection.updateOne(
+            useQuery,
+            updateUser
+          );
+        }
+
+        res.send(result);
       } catch (error) {
         res.status(401).json({
           message: "Data not found",
