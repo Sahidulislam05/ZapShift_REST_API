@@ -80,9 +80,10 @@ async function run() {
       const email = req.decoded_email;
       const query = { email };
       const user = await userCollection.findOne(query);
-      if (!user || user.role === "admin") {
+      if (!user || user.role !== "admin") {
         return res.status(403).send({ message: "forbidden" });
       }
+
       next();
     };
     // User REST API
@@ -155,7 +156,7 @@ async function run() {
     );
     // Parcel API
 
-    app.get("/parcels", verifyFBToken, verifyAdmin, async (req, res) => {
+    app.get("/parcels", verifyFBToken, async (req, res) => {
       try {
         const query = {};
         const { email, deliveryStatus } = req.query;
@@ -178,6 +179,20 @@ async function run() {
           error,
         });
       }
+    });
+
+    app.get("/parcels/rider", async (req, res) => {
+      const { riderEmail, deliveryStatus } = req.query;
+      const query = {};
+      if (riderEmail) {
+        query.riderEmail = riderEmail;
+      }
+      if (deliveryStatus) {
+        query.deliveryStatus = { $in: ["driver_assigned", "rider_arriving"] };
+      }
+      const cursor = parcelCollection.find(query);
+      const result = await cursor.toArray();
+      res.send(result);
     });
 
     app.get("/parcels/:id", async (req, res) => {
@@ -221,7 +236,7 @@ async function run() {
       const updateDOC = {
         $set: {
           riderId: riderId,
-          deliveryStatus: "driver-assigned",
+          deliveryStatus: "driver_assigned",
           riderName: riderName,
           riderEmail: riderEmail,
         },
@@ -238,6 +253,18 @@ async function run() {
         riderUpdatedDOC
       );
       res.send(result, riderResult);
+    });
+
+    app.patch("/parcels/:id/status", async (req, res) => {
+      const { deliveryStatus } = req.body;
+      const query = { _id: new ObjectId(req.params.id) };
+      const updateDOC = {
+        $set: {
+          deliveryStatus: deliveryStatus,
+        },
+      };
+      const result = await parcelCollection.updateOne(query, updateDOC);
+      res.send(result);
     });
 
     app.delete("/parcels/:id", async (req, res) => {
@@ -480,14 +507,14 @@ async function run() {
 
         if (status === "approved") {
           const email = req.body.email;
-          const useQuery = { email };
+          const userQuery = { email };
           const updateUser = {
             $set: {
               role: "rider",
             },
           };
-          const userResult = await ridersCollection.updateOne(
-            useQuery,
+          const userResult = await userCollection.updateOne(
+            userQuery,
             updateUser
           );
         }
