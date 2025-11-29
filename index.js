@@ -14,6 +14,7 @@ const port = process.env.PORT || 3000;
 
 // var admin = require("firebase-admin");
 import serviceAccount from "./zap-shift-service-firebase-admin-sdk.json" with { type: "json" };
+import { count } from "console";
 // var serviceAccount = require("./zap-shift-service-firebase-admin-sdk.json");
 
 admin.initializeApp({
@@ -87,6 +88,15 @@ async function run() {
 
       next();
     };
+    // const verifyRider = async (req, res, next) => {
+    //   const email = req.decoded_email;
+    //   const query = { email };
+    //   const user = await userCollection.findOne(query);
+    //   if (!user || user.role !== "rider") {
+    //     return res.status(403).send({ message: "forbidden" });
+    //   }
+    //   next();
+    // };
 
     const logTracking = async (trackingId, status) => {
       const log = {
@@ -225,6 +235,25 @@ async function run() {
           error,
         });
       }
+    });
+
+    app.get("/parcels/delivery-status/status", async (req, res) => {
+      const pipeline = [
+        {
+          $group: {
+            _id: "$deliveryStatus",
+            count: { $sum: 1 },
+          },
+        },
+        {
+          $project: {
+            status: "$_id",
+            count: 1,
+          },
+        },
+      ];
+      const result = await parcelCollection.aggregate(pipeline).toArray();
+      res.send(result);
     });
 
     app.post("/parcels", async (req, res) => {
@@ -434,17 +463,16 @@ async function run() {
             paidAt: new Date(),
             trackingId: trackingId,
           };
-          if (session.payment_status === "paid") {
-            const resultPayment = await paymentCollection.insertOne(payment);
-            logTracking(trackingId, "parcel_paid");
-            res.status(200).json({
-              message: "Payment verified and get transaction id!",
-              modifyParcel: result,
-              trackingId: trackingId,
-              transactionId: session.payment_intent,
-              paymentInfo: resultPayment,
-            });
-          }
+
+          const resultPayment = await paymentCollection.insertOne(payment);
+          logTracking(trackingId, "parcel_paid");
+          return res.status(200).json({
+            message: "Payment verified and get transaction id!",
+            modifyParcel: result,
+            trackingId: trackingId,
+            transactionId: session.payment_intent,
+            paymentInfo: resultPayment,
+          });
         }
       } catch (error) {
         res.status(401).json({
