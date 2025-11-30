@@ -13,9 +13,16 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // var admin = require("firebase-admin");
-import serviceAccount from "./zap-shift-service-firebase-admin-sdk.json" with { type: "json" };
-import { count } from "console";
+// import serviceAccount from "./zap-shift-service-firebase-admin-sdk.json" with { type: "json" };
+
 // var serviceAccount = require("./zap-shift-service-firebase-admin-sdk.json");
+
+// const serviceAccount = require("./firebase-admin-key.json");
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, "base64").toString(
+  "utf8"
+);
+const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -68,7 +75,6 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
     const db = client.db("zap_shift");
     const userCollection = db.collection("users");
     const parcelCollection = db.collection("parcels");
@@ -553,6 +559,52 @@ async function run() {
       }
     });
 
+    app.get("/riders/delivery-per-day", async (req, res) => {
+      const email = req.query.email;
+      const pipeline = [
+        {
+          $match: {
+            riderEmail: email,
+            deliveryStatus: "parcel_delivered",
+          },
+        },
+        {
+          $lookup: {
+            from: "trackings",
+            localField: "trackingId",
+            foreignField: "trackingId",
+            as: "parcel_trackings",
+          },
+        },
+        {
+          $unwind: "$parcel_trackings",
+        },
+        {
+          $match: {
+            "parcel_trackings.status": "parcel_delivered",
+          },
+        },
+        {
+          $addFields: {
+            deliveryDay: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "parcel_trackings.createdAt",
+              },
+            },
+          },
+        },
+        {
+          $group: {
+            _id: "$deliveryDay",
+            deliveredCount: { $sum: 1 },
+          },
+        },
+      ];
+      const result = await parcelCollection.aggregate(pipeline).toArray();
+      res.send(result);
+    });
+
     app.patch("/riders/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const status = req.body.status;
@@ -596,7 +648,7 @@ async function run() {
       const result = await trackingsCollection.find(query).toArray();
       res.send(result);
     });
-    await client.db("admin").command({ ping: 1 });
+
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
